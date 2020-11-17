@@ -42,6 +42,10 @@ public abstract class Server implements Runnable {
 
   private final Charset urlCharset;
 
+  public Server() {
+    this(StandardCharsets.UTF_8);
+  }
+
   public Server(final Charset urlCharset) {
     this.urlCharset = urlCharset;
   }
@@ -464,7 +468,7 @@ public abstract class Server implements Runnable {
   }
 
   public static void main(final String[] args) {
-    new Server(StandardCharsets.UTF_8) {
+    new Server() {
       @Override
       public Response process(final Request request) {
         System.out.println(request.method + " " + request.url);

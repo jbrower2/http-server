@@ -9,6 +9,17 @@ public class ErrorResponseException extends RuntimeException {
     this.response = response;
   }
 
+  public ErrorResponseException(final Response response, final String message) {
+    super(message);
+    this.response = response;
+  }
+
+  public ErrorResponseException(
+      final Response response, final String message, final Throwable cause) {
+    super(message, cause);
+    this.response = response;
+  }
+
   public ErrorResponseException(final Status status, final String message) {
     super(message);
     response = Response.of(status, message);
