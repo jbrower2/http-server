@@ -45,7 +45,7 @@ public final class Server implements Runnable {
 
   private final Charset urlCharset;
   private final List<Map.Entry<RequestMatcher, RequestHandler>> handlers = new ArrayList<>();
-  private final ErrorHandler errorHandler =
+  private ErrorHandler errorHandler =
       (req, res, t) -> {
         t.printStackTrace();
         res.reset();
@@ -70,7 +70,7 @@ public final class Server implements Runnable {
     return this;
   }
 
-  public Server useSerializer(final RequestMatcher matcher, final Serializer serializer) {
+  public Server withSerializer(final RequestMatcher matcher, final Serializer serializer) {
     return handle(
         matcher,
         (req, res) -> {
@@ -79,7 +79,7 @@ public final class Server implements Runnable {
         });
   }
 
-  public Server useDeserializer(final RequestMatcher matcher, final Deserializer deserializer) {
+  public Server withDeserializer(final RequestMatcher matcher, final Deserializer deserializer) {
     return handle(
         matcher,
         (req, res) -> {
@@ -88,7 +88,7 @@ public final class Server implements Runnable {
         });
   }
 
-  public Server useMapper(final RequestMatcher matcher, final Mapper mapper) {
+  public Server withMapper(final RequestMatcher matcher, final Mapper mapper) {
     return handle(
         matcher,
         (req, res) -> {
@@ -96,6 +96,11 @@ public final class Server implements Runnable {
           req.deserializer = mapper;
           return false;
         });
+  }
+
+  public Server withErrorHandler(final ErrorHandler errorHandler) {
+    this.errorHandler = errorHandler;
+    return this;
   }
 
   @Override
