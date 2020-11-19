@@ -26,7 +26,7 @@ import java.util.stream.Collectors;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.InflaterInputStream;
 
-public abstract class Server implements Runnable {
+public final class Server implements Runnable {
   private static final String CRLF = "\r\n";
 
   private static final Pattern FIRST_LINE =
@@ -41,6 +41,8 @@ public abstract class Server implements Runnable {
   }
 
   private final Charset urlCharset;
+  private final List<Map.Entry<RequestMatcher, RequestHandler>> handlers = new ArrayList<>();
+  private boolean started = false;
 
   public Server() {
     this(StandardCharsets.UTF_8);
@@ -50,10 +52,17 @@ public abstract class Server implements Runnable {
     this.urlCharset = urlCharset;
   }
 
-  public abstract Response process(Request request);
+  public void handle(final RequestMatcher matcher, final RequestHandler handler) {
+    handlers.add(Map.entry(matcher, handler));
+  }
 
   @Override
-  public final void run() {
+  public void run() {
+    if (started) {
+      throw new IllegalArgumentException();
+    }
+    started = true;
+
     try (ServerSocket myServerSocket = new ServerSocket(80)) {
       System.out.println("Server started...");
       while (true) {
@@ -61,10 +70,17 @@ public abstract class Server implements Runnable {
             InputStream is = mySocket.getInputStream();
             OutputStream os = mySocket.getOutputStream()) {
           // process request
-          Response response = null;
+          Response response = new Response();
           try {
             final Request request = buildRequest(is);
-            response = process(request);
+            for (final Map.Entry<RequestMatcher, RequestHandler> e : handlers) {
+              if (!e.getKey().matches(request)) {
+                continue;
+              }
+              if (!e.getValue().handle(request, response)) {
+                break;
+              }
+            }
           } catch (final ErrorResponseException e) {
             e.printStackTrace();
             response = e.response;
@@ -233,7 +249,7 @@ public abstract class Server implements Runnable {
             request.url = decodePercent(urlString, 0, urlString.length());
           } else {
             request.url = decodePercent(urlString, 0, q);
-            decodeParams(urlString, q + 1, request.params);
+            decodeParams(urlString, q + 1, request.query);
           }
         };
 
@@ -468,22 +484,23 @@ public abstract class Server implements Runnable {
   }
 
   public static void main(final String[] args) {
-    new Server() {
-      @Override
-      public Response process(final Request request) {
-        System.out.println(request.method + " " + request.url);
-        request.params.forEach(
-            (k, vs) ->
-                System.out.println(
-                    "\tquery: '"
-                        + k
-                        + "' = "
-                        + vs.stream()
-                            .map(v -> v == null ? "<null>" : "'" + v + "'")
-                            .collect(Collectors.joining(", "))));
-        System.out.println("\theaders: " + CaseUtil.indent(request.headers));
-        return new Response();
-      }
-    }.run();
+    final Server server = new Server();
+    server.handle(
+        RequestMatcher.all(),
+        (req, res) -> {
+          System.out.println(req.method + " " + req.url);
+          req.query.forEach(
+              (k, vs) ->
+                  System.out.println(
+                      "\tquery: '"
+                          + k
+                          + "' = "
+                          + vs.stream()
+                              .map(v -> v == null ? "<null>" : "'" + v + "'")
+                              .collect(Collectors.joining(", "))));
+          System.out.println("\theaders: " + CaseUtil.indent(req.headers));
+          return true;
+        });
+    server.run();
   }
 }
