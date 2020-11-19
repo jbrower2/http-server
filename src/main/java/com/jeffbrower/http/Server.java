@@ -249,7 +249,7 @@ public final class Server implements Runnable {
             request.url = decodePercent(urlString, 0, urlString.length());
           } else {
             request.url = decodePercent(urlString, 0, q);
-            decodeParams(urlString, q + 1, request.query);
+            decodeParams(urlString, q + 1, request.queryParams);
           }
         };
 
@@ -489,7 +489,7 @@ public final class Server implements Runnable {
         RequestMatcher.all(),
         (req, res) -> {
           System.out.println(req.method + " " + req.url);
-          req.query.forEach(
+          req.queryParams.forEach(
               (k, vs) ->
                   System.out.println(
                       "\tquery: '"

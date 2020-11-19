@@ -93,7 +93,7 @@ public class PathMatcher implements RequestMatcher {
     if (!m.matches()) {
       return false;
     }
-    names.forEach(name -> req.path.put(name, m.group(name)));
+    names.forEach(name -> req.pathParams.put(name, m.group(name)));
     return true;
   }
 }
