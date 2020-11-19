@@ -522,55 +522,52 @@ public final class Server implements Runnable {
   }
 
   public static void main(final String[] args) {
-    final Server server = new Server();
-
-    // basic auth
-    server.handle(
-        RequestMatcher.all(),
-        (req, res) -> {
-          final Optional<String> authOpt = req.headers.request.get(RequestHeader.AUTHORIZATION);
-          if (authOpt.isPresent()) {
-            final String auth = authOpt.get();
-            final int space = auth.indexOf(' ');
-            if (space != -1 && "Basic".equalsIgnoreCase(auth.substring(0, space))) {
-              final String credentials =
-                  new String(Base64.getDecoder().decode(auth.substring(space + 1)), UTF_8);
-              final int colon = credentials.indexOf(':');
-              if (colon != -1) {
-                final String username = credentials.substring(0, colon);
-                final String password = credentials.substring(colon + 1);
-                System.out.println("Username: " + username);
-                System.out.println("Password: " + password);
-                if ("jeff".equals(username) && "password".equals(password)) {
-                  return false;
+    new Server()
+        // basic auth
+        .handle(
+            RequestMatcher.all(),
+            (req, res) -> {
+              final Optional<String> authOpt = req.headers.request.get(RequestHeader.AUTHORIZATION);
+              if (authOpt.isPresent()) {
+                final String auth = authOpt.get();
+                final int space = auth.indexOf(' ');
+                if (space != -1 && "Basic".equalsIgnoreCase(auth.substring(0, space))) {
+                  final String credentials =
+                      new String(Base64.getDecoder().decode(auth.substring(space + 1)), UTF_8);
+                  final int colon = credentials.indexOf(':');
+                  if (colon != -1) {
+                    final String username = credentials.substring(0, colon);
+                    final String password = credentials.substring(colon + 1);
+                    System.out.println("Username: " + username);
+                    System.out.println("Password: " + password);
+                    if ("jeff".equals(username) && "password".equals(password)) {
+                      return false;
+                    }
+                  }
                 }
               }
-            }
-          }
-          res.status = Status.UNAUTHORIZED;
-          res.headers.response.add(ResponseHeader.WWW_AUTHENTICATE, "Basic charset=UTF-8");
-          res.body = null;
-          return true;
-        });
-
-    // handle requests
-    server.handle(
-        RequestMatcher.all(),
-        (req, res) -> {
-          System.out.println(req.method + " " + req.url);
-          req.queryParams.forEach(
-              (k, vs) ->
-                  System.out.println(
-                      "\tquery: '"
-                          + k
-                          + "' = "
-                          + vs.stream()
-                              .map(v -> v == null ? "<null>" : "'" + v + "'")
-                              .collect(Collectors.joining(", "))));
-          System.out.println("\theaders: " + CaseUtil.indent(req.headers));
-          return true;
-        });
-
-    server.run();
+              res.status = Status.UNAUTHORIZED;
+              res.headers.response.add(ResponseHeader.WWW_AUTHENTICATE, "Basic charset=UTF-8");
+              res.body = null;
+              return true;
+            })
+        // handle requests
+        .handle(
+            RequestMatcher.all(),
+            (req, res) -> {
+              System.out.println(req.method + " " + req.url);
+              req.queryParams.forEach(
+                  (k, vs) ->
+                      System.out.println(
+                          "\tquery: '"
+                              + k
+                              + "' = "
+                              + vs.stream()
+                                  .map(v -> v == null ? "<null>" : "'" + v + "'")
+                                  .collect(Collectors.joining(", "))));
+              System.out.println("\theaders: " + CaseUtil.indent(req.headers));
+              return true;
+            })
+        .run();
   }
 }
