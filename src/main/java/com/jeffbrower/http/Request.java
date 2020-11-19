@@ -13,6 +13,8 @@ public class Request {
   public Deserializer deserializer;
   public byte[] body;
 
+  Request() {}
+
   public <T> T getBody(final Class<? extends T> clazz) {
     if (deserializer == null) {
       if (body == null || clazz == byte[].class) {
@@ -20,6 +22,6 @@ public class Request {
       }
       throw new IllegalArgumentException("No deserializer specified");
     }
-    return deserializer.deserialize(body, clazz);
+    return deserializer.deserialize(this, clazz);
   }
 }

@@ -45,6 +45,16 @@ public final class Server implements Runnable {
 
   private final Charset urlCharset;
   private final List<Map.Entry<RequestMatcher, RequestHandler>> handlers = new ArrayList<>();
+  private final ErrorHandler errorHandler =
+      (req, res, t) -> {
+        t.printStackTrace();
+        res.reset();
+        res.status =
+            t instanceof ErrorResponseException
+                ? ((ErrorResponseException) t).status
+                : Status.INTERNAL_SERVER_ERROR;
+        res.stringBody(t.getMessage());
+      };
   private boolean started = false;
 
   public Server() {
@@ -101,52 +111,49 @@ public final class Server implements Runnable {
         try (Socket mySocket = myServerSocket.accept();
             InputStream is = mySocket.getInputStream();
             OutputStream os = mySocket.getOutputStream()) {
+          final Request req = new Request();
+          final Response res = new Response(req);
           // process request
-          Response response = new Response();
           try {
-            final Request request = buildRequest(is);
+            readRequest(is, req);
             boolean handled = false;
             for (final Map.Entry<RequestMatcher, RequestHandler> e : handlers) {
-              if (!e.getKey().matches(request)) {
+              if (!e.getKey().matches(req)) {
                 continue;
               }
-              if (e.getValue().handle(request, response)) {
+              if (e.getValue().handle(req, res)) {
                 handled = true;
                 break;
               }
             }
             if (!handled) {
-              response = Response.of(Status.NOT_FOUND, "Not handled: " + request.url);
+              throw new ErrorResponseException(Status.NOT_FOUND, "Not handled: " + req.url);
             }
-          } catch (final ErrorResponseException e) {
-            e.printStackTrace();
-            response = e.response;
-          } catch (final Exception e) {
-            e.printStackTrace();
-            response = Response.of(Status.INTERNAL_SERVER_ERROR, e.getMessage());
+          } catch (final Throwable t) {
+            errorHandler.handle(req, res, t);
           }
 
           // set date header, if not already set
-          if (!response.headers.general.contains(GeneralHeader.DATE)) {
-            response.headers.general.add(GeneralHeader.DATE, GMT_FORMAT.format(new Date()));
+          if (!res.headers.general.contains(GeneralHeader.DATE)) {
+            res.headers.general.add(GeneralHeader.DATE, GMT_FORMAT.format(new Date()));
           }
 
           // build response
           final StringBuilder b = new StringBuilder();
           b.append("HTTP/1.1 ")
-              .append(response.status.statusCode)
+              .append(res.status.statusCode)
               .append(' ')
-              .append(response.status.reasonPhrase)
+              .append(res.status.reasonPhrase)
               .append(CRLF);
-          for (final Map.Entry<String, String> e : response.headers) {
+          for (final Map.Entry<String, String> e : res.headers) {
             b.append(e.getKey()).append(": ").append(e.getValue()).append(CRLF);
           }
           b.append(CRLF);
 
           // write to stream
           os.write(US_ASCII.newEncoder().encode(CharBuffer.wrap(b)).array());
-          if (response.body != null) {
-            os.write(response.serializeBody());
+          if (res.body != null) {
+            os.write(res.serializeBody());
           }
         } catch (final IOException e) {
           e.printStackTrace();
@@ -157,8 +164,7 @@ public final class Server implements Runnable {
     }
   }
 
-  private Request buildRequest(final InputStream is) throws IOException {
-    final Request request = new Request();
+  private Request readRequest(final InputStream is, final Request request) throws IOException {
     parseHeaders(is, request);
 
     if (request.method == null) {
