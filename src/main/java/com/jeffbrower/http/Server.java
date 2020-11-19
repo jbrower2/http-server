@@ -1,5 +1,8 @@
 package com.jeffbrower.http;
 
+import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.nio.charset.StandardCharsets.UTF_8;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -12,8 +15,8 @@ import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -45,15 +48,44 @@ public final class Server implements Runnable {
   private boolean started = false;
 
   public Server() {
-    this(StandardCharsets.UTF_8);
+    this(UTF_8);
   }
 
   public Server(final Charset urlCharset) {
     this.urlCharset = urlCharset;
   }
 
-  public void handle(final RequestMatcher matcher, final RequestHandler handler) {
+  public Server handle(final RequestMatcher matcher, final RequestHandler handler) {
     handlers.add(Map.entry(matcher, handler));
+    return this;
+  }
+
+  public Server useSerializer(final RequestMatcher matcher, final Serializer serializer) {
+    return handle(
+        matcher,
+        (req, res) -> {
+          res.serializer = serializer;
+          return false;
+        });
+  }
+
+  public Server useDeserializer(final RequestMatcher matcher, final Deserializer deserializer) {
+    return handle(
+        matcher,
+        (req, res) -> {
+          req.deserializer = deserializer;
+          return false;
+        });
+  }
+
+  public Server useMapper(final RequestMatcher matcher, final Mapper mapper) {
+    return handle(
+        matcher,
+        (req, res) -> {
+          res.serializer = mapper;
+          req.deserializer = mapper;
+          return false;
+        });
   }
 
   @Override
@@ -73,13 +105,18 @@ public final class Server implements Runnable {
           Response response = new Response();
           try {
             final Request request = buildRequest(is);
+            boolean handled = false;
             for (final Map.Entry<RequestMatcher, RequestHandler> e : handlers) {
               if (!e.getKey().matches(request)) {
                 continue;
               }
-              if (!e.getValue().handle(request, response)) {
+              if (e.getValue().handle(request, response)) {
+                handled = true;
                 break;
               }
+            }
+            if (!handled) {
+              response = Response.of(Status.NOT_FOUND, "Not handled: " + request.url);
             }
           } catch (final ErrorResponseException e) {
             e.printStackTrace();
@@ -107,9 +144,9 @@ public final class Server implements Runnable {
           b.append(CRLF);
 
           // write to stream
-          os.write(StandardCharsets.US_ASCII.newEncoder().encode(CharBuffer.wrap(b)).array());
+          os.write(US_ASCII.newEncoder().encode(CharBuffer.wrap(b)).array());
           if (response.body != null) {
-            os.write(response.body);
+            os.write(response.serializeBody());
           }
         } catch (final IOException e) {
           e.printStackTrace();
@@ -188,11 +225,12 @@ public final class Server implements Runnable {
         throw new BadRequestException("Negative Content-Length: " + size);
       }
       if (size != 0) {
-        request.body = is.readNBytes(size);
-        if (request.body.length < size) {
+        final byte[] body = is.readNBytes(size);
+        if (body.length < size) {
           throw new BadRequestException(
-              "Only received partial request: " + request.body.length + " / " + size);
+              "Only received partial request: " + body.length + " / " + size);
         }
+        request.body = body;
       }
     }
 
@@ -485,6 +523,37 @@ public final class Server implements Runnable {
 
   public static void main(final String[] args) {
     final Server server = new Server();
+
+    // basic auth
+    server.handle(
+        RequestMatcher.all(),
+        (req, res) -> {
+          final Optional<String> authOpt = req.headers.request.get(RequestHeader.AUTHORIZATION);
+          if (authOpt.isPresent()) {
+            final String auth = authOpt.get();
+            final int space = auth.indexOf(' ');
+            if (space != -1 && "Basic".equalsIgnoreCase(auth.substring(0, space))) {
+              final String credentials =
+                  new String(Base64.getDecoder().decode(auth.substring(space + 1)), UTF_8);
+              final int colon = credentials.indexOf(':');
+              if (colon != -1) {
+                final String username = credentials.substring(0, colon);
+                final String password = credentials.substring(colon + 1);
+                System.out.println("Username: " + username);
+                System.out.println("Password: " + password);
+                if ("jeff".equals(username) && "password".equals(password)) {
+                  return false;
+                }
+              }
+            }
+          }
+          res.status = Status.UNAUTHORIZED;
+          res.headers.response.add(ResponseHeader.WWW_AUTHENTICATE, "Basic charset=UTF-8");
+          res.body = null;
+          return true;
+        });
+
+    // handle requests
     server.handle(
         RequestMatcher.all(),
         (req, res) -> {
@@ -501,6 +570,7 @@ public final class Server implements Runnable {
           System.out.println("\theaders: " + CaseUtil.indent(req.headers));
           return true;
         });
+
     server.run();
   }
 }

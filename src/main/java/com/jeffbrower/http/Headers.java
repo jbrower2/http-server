@@ -23,6 +23,14 @@ public final class Headers implements Iterable<Map.Entry<String, String>> {
     additional = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
   }
 
+  public void reset() {
+    general.reset();
+    request.reset();
+    response.reset();
+    entity.reset();
+    additional.clear();
+  }
+
   public Optional<String> get(final String key) {
     final Optional<ResponseHeader> res = ResponseHeader.of(key);
     if (res.isPresent()) {
@@ -158,6 +166,12 @@ public final class Headers implements Iterable<Map.Entry<String, String>> {
 
     private EnumHeaders(final Class<K> keyClass) {
       this.map = keyClass == null ? null : new EnumMap<>(keyClass);
+    }
+
+    public void reset() {
+      if (map != null) {
+        map.clear();
+      }
     }
 
     public boolean isEmpty() {
