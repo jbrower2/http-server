@@ -110,6 +110,16 @@ public enum Status {
   NETWORK_READ_TIMEOUT_ERROR(598),
   NETWORK_CONNECT_TIMEOUT_ERROR(599);
 
+  public static final int MAX_LENGTH;
+
+  static {
+    int max = -1;
+    for (final Status value : values()) {
+      max = Math.max(max, value.reasonPhrase.length());
+    }
+    MAX_LENGTH = max;
+  }
+
   public final int statusCode;
   public final String reasonPhrase;
   public final Class statusClass;
@@ -123,6 +133,14 @@ public enum Status {
     this.reasonPhrase =
         reasonPhrase == null ? CaseUtil.upperUnderscoreToTitleSpace(name()) : reasonPhrase;
     statusClass = Class.valueOf(statusCode);
+  }
+
+  public ErrorResponseException exception(final String message) {
+    return new ErrorResponseException(this, message);
+  }
+
+  public ErrorResponseException exception(final String message, final Throwable cause) {
+    return new ErrorResponseException(this, message, cause);
   }
 
   @Override

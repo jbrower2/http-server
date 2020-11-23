@@ -5,14 +5,14 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import java.nio.charset.Charset;
 
 public class Response {
-  private final Request req;
+  public final Request request;
   public Status status = Status.OK;
   public final Headers headers = new Headers(false);
   public Serializer serializer;
   public Object body;
 
-  Response(final Request req) {
-    this.req = req;
+  Response(final Request request) {
+    this.request = request;
   }
 
   public Response stringBody(final String string) {
@@ -20,7 +20,7 @@ public class Response {
   }
 
   public Response stringBody(final String string, final Charset charset) {
-    headers.entity.add(EntityHeader.CONTENT_TYPE, "text/plain;charset=utf-8");
+    headers.entity.add(EntityHeader.CONTENT_TYPE, "text/plain;charset=" + charset.name());
     body = string.getBytes(charset);
     return this;
   }
@@ -38,6 +38,6 @@ public class Response {
       }
       throw new IllegalArgumentException("No serializer specified");
     }
-    return serializer.serialize(req, this, body);
+    return serializer.serialize(this);
   }
 }

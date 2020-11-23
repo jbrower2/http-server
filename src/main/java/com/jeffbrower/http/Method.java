@@ -1,7 +1,5 @@
 package com.jeffbrower.http;
 
-import java.util.Optional;
-
 public enum Method implements RequestMatcher {
   GET(true, true),
   HEAD(true, true),
@@ -25,12 +23,12 @@ public enum Method implements RequestMatcher {
     return req.method == this;
   }
 
-  public static Optional<Method> of(final String s) {
+  public static Method of(final String s) {
     for (final Method m : values()) {
       if (s.equalsIgnoreCase(m.name())) {
-        return Optional.of(m);
+        return m;
       }
     }
-    return Optional.empty();
+    throw Status.METHOD_NOT_ALLOWED.exception(s);
   }
 }

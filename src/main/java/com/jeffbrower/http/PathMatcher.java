@@ -1,7 +1,9 @@
 package com.jeffbrower.http;
 
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -19,14 +21,17 @@ public class PathMatcher implements RequestMatcher {
 
   private static Pattern parsePath(
       final String path, final boolean ignoreCase, final PathMatcher self) {
-    // TODO add support for numeric ranges (min, max, step)
-    // step enforces that the given value is a multiple of the step
+    // TODO add support for numeric ranges (min, max, step, roundingMode)
+    // step enforces that the given value is a multiple of the step, unless roundingMode is set
+    // roundingMode rounds to the nearest step, and is one of: round, floor, ceiling
     // if step is left out, it is inferred from min/max
+    // if step is "unlimited", arbitrary precision is accepted and no rounding is performed
     // if min/max are left out, they are inferred to be negative/positive infinity (but must be open
     // bound)
     // {param[0,10]}
     // {param(-1.23,4.56)}
     // {param(0,1,0.001]}
+    // {param[0,1,unlimited]}
     // {param(,10]}
     // {param[10,)}
     if (!path.startsWith("/")) {
@@ -103,6 +108,11 @@ public class PathMatcher implements RequestMatcher {
 
   public PathMatcher(final Pattern pattern) {
     this.pattern = pattern;
+  }
+
+  public Optional<MatchResult> startsWith(final Request req) {
+    final Matcher m = pattern.matcher(req.url);
+    return m.lookingAt() ? Optional.of(m.toMatchResult()) : Optional.empty();
   }
 
   @Override

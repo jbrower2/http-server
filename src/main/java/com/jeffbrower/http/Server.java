@@ -8,6 +8,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
@@ -65,7 +66,14 @@ public final class Server implements Runnable {
     this.urlCharset = urlCharset;
   }
 
+  private void assertNotStarted() {
+    if (started) {
+      throw new IllegalStateException("Server is already started");
+    }
+  }
+
   public Server handle(final RequestMatcher matcher, final RequestHandler handler) {
+    assertNotStarted();
     handlers.add(Map.entry(matcher, handler));
     return this;
   }
@@ -99,25 +107,26 @@ public final class Server implements Runnable {
   }
 
   public Server withErrorHandler(final ErrorHandler errorHandler) {
+    assertNotStarted();
     this.errorHandler = errorHandler;
     return this;
   }
 
   @Override
   public void run() {
-    if (started) {
-      throw new IllegalArgumentException();
-    }
+    assertNotStarted();
     started = true;
 
     try (ServerSocket myServerSocket = new ServerSocket(80)) {
       System.out.println("Server started...");
       while (true) {
-        try (Socket mySocket = myServerSocket.accept();
-            InputStream is = mySocket.getInputStream();
-            OutputStream os = mySocket.getOutputStream()) {
+        try (Socket s = myServerSocket.accept();
+            InputStream is = s.getInputStream();
+            OutputStream os = s.getOutputStream();
+            OutputStreamWriter osw = new OutputStreamWriter(os, US_ASCII.newEncoder())) {
           final Request req = new Request();
           final Response res = new Response(req);
+
           // process request
           try {
             readRequest(is, req);
@@ -132,7 +141,7 @@ public final class Server implements Runnable {
               }
             }
             if (!handled) {
-              throw new ErrorResponseException(Status.NOT_FOUND, "Not handled: " + req.url);
+              throw Status.NOT_FOUND.exception("URL not handled: " + req.url);
             }
           } catch (final Throwable t) {
             errorHandler.handle(req, res, t);
@@ -144,19 +153,19 @@ public final class Server implements Runnable {
           }
 
           // build response
-          final StringBuilder b = new StringBuilder();
-          b.append("HTTP/1.1 ")
-              .append(res.status.statusCode)
-              .append(' ')
-              .append(res.status.reasonPhrase)
-              .append(CRLF);
+          osw.write("HTTP/1.1 ");
+          osw.write(res.status.statusCode);
+          osw.write(' ');
+          osw.write(res.status.reasonPhrase);
+          osw.write(CRLF);
           for (final Map.Entry<String, String> e : res.headers) {
-            b.append(e.getKey()).append(": ").append(e.getValue()).append(CRLF);
+            osw.write(e.getKey());
+            osw.write(": ");
+            osw.write(e.getValue());
+            osw.write(CRLF);
           }
-          b.append(CRLF);
-
-          // write to stream
-          os.write(US_ASCII.newEncoder().encode(CharBuffer.wrap(b)).array());
+          osw.write(CRLF);
+          osw.flush();
           if (res.body != null) {
             os.write(res.serializeBody());
           }
@@ -173,7 +182,7 @@ public final class Server implements Runnable {
     parseHeaders(is, request);
 
     if (request.method == null) {
-      throw new BadRequestException("Empty request");
+      throw Status.BAD_REQUEST.exception("Empty request");
     }
 
     // get message body, if present
@@ -182,17 +191,17 @@ public final class Server implements Runnable {
     final Optional<String> contentLength = request.headers.entity.get(EntityHeader.CONTENT_LENGTH);
     if (transferEncoding.isPresent()) {
       if (contentLength.isPresent()) {
-        throw new BadRequestException("Cannot send both Transfer-Encoding and Content-Length");
+        throw Status.BAD_REQUEST.exception("Cannot send both Transfer-Encoding and Content-Length");
       }
 
       // split list of encodings
       final Header.WithParams[] encs = Header.parseWithParams(transferEncoding.get());
       final Header.WithParams lastEnc = encs[encs.length - 1];
       if (!"chunked".equalsIgnoreCase(lastEnc.value)) {
-        throw new BadRequestException("Last Transfer-Encoding of request must be 'chunked'");
+        throw Status.BAD_REQUEST.exception("Last Transfer-Encoding of request must be 'chunked'");
       }
       if (!lastEnc.params.isEmpty()) {
-        throw new BadRequestException("Transfer-Encoding value cannot have params");
+        throw Status.BAD_REQUEST.exception("Transfer-Encoding value cannot have params");
       }
 
       // read chunked body
@@ -209,36 +218,33 @@ public final class Server implements Runnable {
       for (int i = encs.length - 2; i >= 0; i--) {
         final Header.WithParams enc = encs[i];
         if (!enc.params.isEmpty()) {
-          throw new BadRequestException("Transfer-Encoding value cannot have params");
+          throw Status.BAD_REQUEST.exception("Transfer-Encoding value cannot have params");
         }
         if ("chunked".equalsIgnoreCase(enc.value)) {
-          throw new BadRequestException("Duplicate Transfer-Encoding 'chunked'");
+          throw Status.BAD_REQUEST.exception("Duplicate Transfer-Encoding 'chunked'");
         } else if ("deflate".equalsIgnoreCase(enc.value)) {
           request.body =
               new InflaterInputStream(new ByteArrayInputStream(request.body)).readAllBytes();
         } else if ("gzip".equalsIgnoreCase(enc.value) || "x-gzip".equalsIgnoreCase(enc.value)) {
           request.body = new GZIPInputStream(new ByteArrayInputStream(request.body)).readAllBytes();
         } else if ("br".equalsIgnoreCase(enc.value)) {
-          throw new ErrorResponseException(
-              Status.NOT_IMPLEMENTED, "'br' Transfer-Encoding is not supported");
+          throw Status.NOT_IMPLEMENTED.exception("'br' Transfer-Encoding is not supported");
         } else if ("compress".equalsIgnoreCase(enc.value)
             || "x-compress".equalsIgnoreCase(enc.value)) {
-          throw new ErrorResponseException(
-              Status.NOT_IMPLEMENTED, "'compress' Transfer-Encoding is not supported");
+          throw Status.NOT_IMPLEMENTED.exception("'compress' Transfer-Encoding is not supported");
         } else {
-          throw new ErrorResponseException(
-              Status.NOT_IMPLEMENTED, "Transfer-Encoding not supported: '" + enc + "'");
+          throw Status.NOT_IMPLEMENTED.exception("Transfer-Encoding not supported: '" + enc + "'");
         }
       }
     } else if (contentLength.isPresent()) {
       final int size = Integer.parseInt(contentLength.get());
       if (size < 0) {
-        throw new BadRequestException("Negative Content-Length: " + size);
+        throw Status.BAD_REQUEST.exception("Negative Content-Length: " + size);
       }
       if (size != 0) {
         final byte[] body = is.readNBytes(size);
         if (body.length < size) {
-          throw new BadRequestException(
+          throw Status.BAD_REQUEST.exception(
               "Only received partial request: " + body.length + " / " + size);
         }
         request.body = body;
@@ -270,12 +276,12 @@ public final class Server implements Runnable {
           if (request.method != null) {
             final int colon = line.indexOf(":");
             if (colon == -1) {
-              throw new BadRequestException("Malformed header: " + line);
+              throw Status.BAD_REQUEST.exception("Malformed header: " + line);
             }
 
             final String key = line.substring(0, colon);
             if (!TOKEN.matcher(key).matches()) {
-              throw new BadRequestException("Malformed header field: " + key);
+              throw Status.BAD_REQUEST.exception("Malformed header field: " + key);
             }
 
             request.headers.add(key, line.substring(colon + 1).trim());
@@ -284,13 +290,10 @@ public final class Server implements Runnable {
 
           final Matcher m = FIRST_LINE.matcher(line);
           if (!m.matches()) {
-            throw new BadRequestException("Malformed request line: " + line);
+            throw Status.BAD_REQUEST.exception("Malformed request line: " + line);
           }
 
-          request.method =
-              Method.of(m.group(1))
-                  .orElseThrow(
-                      () -> new ErrorResponseException(Status.METHOD_NOT_ALLOWED, m.group(1)));
+          request.method = Method.of(m.group(1));
 
           final String urlString = m.group(2);
           final int q = urlString.indexOf('?');
@@ -318,7 +321,7 @@ public final class Server implements Runnable {
             continue;
           default:
             // double CR
-            throw new BadRequestException("Unexpected CR");
+            throw Status.BAD_REQUEST.exception("Unexpected CR");
         }
       }
 
@@ -331,7 +334,7 @@ public final class Server implements Runnable {
             break outer;
           default:
             // no preceding CR
-            throw new BadRequestException("Unexpected LF");
+            throw Status.BAD_REQUEST.exception("Unexpected LF");
         }
       }
 
@@ -353,7 +356,7 @@ public final class Server implements Runnable {
           break;
         default:
           // lone CR
-          throw new BadRequestException("Unexpected single CR");
+          throw Status.BAD_REQUEST.exception("Unexpected single CR");
       }
 
       // if horizontal whitespace, continue loop
@@ -369,7 +372,7 @@ public final class Server implements Runnable {
 
       // only support visible ASCII
       if (c < ' ' || c >= 0x7F) {
-        throw new BadRequestException(String.format("Unexpected char %s (0x%02x)", c, c));
+        throw Status.BAD_REQUEST.exception(String.format("Unexpected char %s (0x%02x)", c, c));
       }
 
       headerLine.append((char) c);
@@ -405,13 +408,13 @@ public final class Server implements Runnable {
         switch (c = str.codePointAt(i)) {
           case '%':
             if ((i += 3) > to) {
-              throw new BadRequestException("Unclosed percent-encoding.");
+              throw Status.BAD_REQUEST.exception("Unclosed percent-encoding.");
             }
 
             try {
               baos.write(Integer.parseInt(str.substring(i - 2, i), 16));
             } catch (final NumberFormatException e) {
-              throw new BadRequestException("Bad percent-encoding.", e);
+              throw Status.BAD_REQUEST.exception("Bad percent-encoding.", e);
             }
             break;
 
@@ -426,7 +429,7 @@ public final class Server implements Runnable {
 
       return urlCharset.newDecoder().decode(ByteBuffer.wrap(baos.toByteArray())).toString();
     } catch (final CharacterCodingException e) {
-      throw new BadRequestException("Invalid " + urlCharset.name(), e);
+      throw Status.BAD_REQUEST.exception("Invalid " + urlCharset.name(), e);
     }
   }
 
@@ -474,20 +477,20 @@ public final class Server implements Runnable {
             state = ChunkParseState.CR;
             continue;
           default:
-            throw new BadRequestException("Unexpected CR in 'chunked' body");
+            throw Status.BAD_REQUEST.exception("Unexpected CR in 'chunked' body");
         }
       }
 
       if (c == '\n') {
         if (state != ChunkParseState.CR) {
-          throw new BadRequestException("Unexpected LF in 'chunked' body");
+          throw Status.BAD_REQUEST.exception("Unexpected LF in 'chunked' body");
         }
         break;
       }
 
       if (c == ';') {
         if (state != ChunkParseState.NUM) {
-          throw new BadRequestException("Unexpected ';' in 'chunked' body");
+          throw Status.BAD_REQUEST.exception("Unexpected ';' in 'chunked' body");
         }
         state = ChunkParseState.EXT;
         continue;
@@ -502,19 +505,19 @@ public final class Server implements Runnable {
         case NUM:
           final int d = Character.digit(c, 16);
           if (d == -1) {
-            throw new BadRequestException("Expected chunk size but found '" + c + "'");
+            throw Status.BAD_REQUEST.exception("Expected chunk size but found '" + c + "'");
           }
 
           // would cause overflow on shift
           if ((size & 0x7800_0000) != 0) {
-            throw new BadRequestException("Chunk size too large");
+            throw Status.BAD_REQUEST.exception("Chunk size too large");
           }
 
           size = size << 4 | d;
           break;
 
         default:
-          throw new BadRequestException("Unexpected single CR in 'chunked' body");
+          throw Status.BAD_REQUEST.exception("Unexpected single CR in 'chunked' body");
       }
     }
 
@@ -526,7 +529,8 @@ public final class Server implements Runnable {
     // read this chunk
     final byte[] buf = is.readNBytes(size);
     if (buf.length < size) {
-      throw new BadRequestException("Only received partial chunk: " + buf.length + " / " + size);
+      throw Status.BAD_REQUEST.exception(
+          "Only received partial chunk: " + buf.length + " / " + size);
     }
 
     return buf;

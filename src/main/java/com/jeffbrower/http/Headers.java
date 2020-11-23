@@ -188,14 +188,14 @@ public final class Headers implements Iterable<Map.Entry<String, String>> {
 
     public Optional<String> replace(final K key, final String value) {
       if (map == null) {
-        throw new BadRequestException("Header '" + key + "' not allowed");
+        throw Status.BAD_REQUEST.exception("Header '" + key + "' not allowed");
       }
       return Optional.ofNullable(map.put(key, value));
     }
 
     public Optional<String> add(final K key, final String value) {
       if (map == null) {
-        throw new BadRequestException("Header '" + key + "' not allowed");
+        throw Status.BAD_REQUEST.exception("Header '" + key + "' not allowed");
       }
       return Optional.ofNullable(
           map.merge(key, value, (existing, newValue) -> key.combineMultiple(existing, newValue)));

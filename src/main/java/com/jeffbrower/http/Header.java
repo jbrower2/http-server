@@ -14,7 +14,7 @@ public interface Header {
       case COMMA_SEPARATED:
         return existing + ',' + newValue;
       default:
-        throw new BadRequestException("Duplicate header: " + header);
+        throw Status.BAD_REQUEST.exception("Duplicate header: " + header);
     }
   }
 
@@ -28,7 +28,7 @@ public interface Header {
         final String s = params[j].trim();
         final int eq = s.indexOf('=');
         if (eq == -1) {
-          throw new BadRequestException("Malformed header params: " + header);
+          throw Status.BAD_REQUEST.exception("Malformed header params: " + header);
         }
         map.put(s.substring(0, eq).trim(), s.substring(eq + 1).trim());
       }
